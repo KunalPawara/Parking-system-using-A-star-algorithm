@@ -1,31 +1,52 @@
-import numpy as np
 import heapq
 import math
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
 
 # Initialize default parking layout
-default_parking_layout = [
-    ['A', ' ', ' ', ' ', ' ', ' ', ' ', 'B'],
-    [' ', ' ', 'P', 'P', 'P', 'P', ' ', ' '],
-    ['X', 'P', 'P', 'X', 'P', 'X', 'P', 'X'],
-    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
-    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
-    [' ', 'P', 'P', 'P', 'P', 'P', 'P', ' '],
-    [' ', ' ', 'P', 'P', 'P', 'P', ' ', ' '],
-    ['C', ' ', ' ', ' ', ' ', ' ', ' ', 'D']
-]
-parking_layout = [row[:] for row in default_parking_layout]
+def create_parking_layout(rows, cols, gates):
+    layout = [[' ' for _ in range(cols)] for _ in range(rows)]
+    # Place entry points based on layout dimensions
+    for gate in gates:
+        layout[gate[0]][gate[1]] = gate[2]  # gate[2] is the identifier (A, B, C, D, etc.)
+    
+    # Fill parking spaces
+    for r in range(rows):
+        for c in range(cols):
+            if layout[r][c] == ' ':
+                layout[r][c] = 'P'  # Fill with parking spots
+    return layout
 
-# Define entry and exit points
-entry_points = {'A': (0, 0), 'B': (0, 7), 'C': (7, 0), 'D': (7, 7)}
+# Prompt user for grid size and gate positions
+def get_grid_size_and_gates():
+    rows = simpledialog.askinteger("Input", "Enter number of rows (min 4):", minvalue=4)
+    cols = simpledialog.askinteger("Input", "Enter number of columns (min 4):", minvalue=4)
+    
+    gates = []
+    number_of_gates = simpledialog.askinteger("Input", "Enter number of entry gates (max 4):", minvalue=1, maxvalue=4)
+
+    for i in range(number_of_gates):
+        gate_row = simpledialog.askinteger("Gate Position", f"Enter row for Gate {chr(65 + i)} (0 to {rows - 1}):", minvalue=0, maxvalue=rows - 1)
+        gate_col = simpledialog.askinteger("Gate Position", f"Enter column for Gate {chr(65 + i)} (0 to {cols - 1}):", minvalue=0, maxvalue=cols - 1)
+        gates.append((gate_row, gate_col, chr(65 + i)))  # chr(65 + i) converts to A, B, C, ...
+
+    return rows, cols, gates
+
+# Get the grid size and gates from the user
+rows, cols, gates = get_grid_size_and_gates()
+parking_layout = create_parking_layout(rows, cols, gates)
+
+# Define entry points based on the new layout
+entry_points = {gate[2]: (gate[0], gate[1]) for gate in gates}
 parking_spots = {(r, c) for r in range(len(parking_layout)) for c in range(len(parking_layout[r])) if parking_layout[r][c] == 'P'}
 occupied_spots = {}
 car_data_file = "car_data_astar.txt"  # File to store car data
 edit_mode = False
+showing_path = False
+last_path = []
 
 def heuristic(a, b):
-    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)  # Euclidean distance
 
 def astar(start, goal, layout):
     """A* search algorithm to find the optimal path."""
@@ -49,7 +70,7 @@ def astar(start, goal, layout):
                 if layout[neighbor[0]][neighbor[1]] == 'X' or neighbor in occupied_spots:
                     continue
                 
-                tentative_g_score = g_score[current] + 1  # Distance to neighbor
+                tentative_g_score = g_score[current] + 1  # Each move costs 1 unit
                 if neighbor in g_score and tentative_g_score >= g_score[neighbor]:
                     continue
                 
@@ -72,7 +93,7 @@ def reconstruct_path(came_from, current):
 def find_nearest_parking_spot(entry_point):
     empty_spots = [spot for spot in parking_spots if spot not in occupied_spots]
     if not empty_spots:
-        return None
+        return None, None  # Return a tuple when no spots are available
 
     shortest_path = None
     nearest_spot = None
@@ -96,15 +117,18 @@ def park_car(car_number, entry_gate):
     entry_point = entry_points[entry_gate]
     nearest_spot, path = find_nearest_parking_spot(entry_point)
 
-    if nearest_spot and path:
-        total_cost = len(path)
+    if nearest_spot is None:
+        return None, None, "Parking area Full."  # Display a clear message for full parking
+
+    if path:
+        total_distance = len(path)  # Total distance in grid units
         occupied_spots[nearest_spot] = car_number
         with open(car_data_file, "a") as file:
-            file.write(f"{car_number}, {path}, {nearest_spot}, Cost: {total_cost}\n")
+            file.write(f"{car_number}, {path}, {nearest_spot}, Distance: {total_distance} units\n")
         
-        return nearest_spot, path, None
+        return nearest_spot, path, total_distance
     else:
-        return None, None, "No available parking spots,Try Entering from other gateways."
+        return None, None, "No available parking spots, try entering from other gateways."
 
 def find_nearest_exit(car_spot):
     return min(entry_points.values(), key=lambda x: heuristic(car_spot, x))
@@ -114,11 +138,12 @@ def unpark_car(car_number):
         if number == car_number:
             nearest_exit = find_nearest_exit(spot)
             path = astar(spot, nearest_exit, parking_layout)
+            total_distance = len(path)  # Total distance in grid units
             del occupied_spots[spot]
             with open(car_data_file, "a") as file:
-                file.write(f"{car_number} unparked from {spot} to exit at {nearest_exit}, Path: {path}\n")
-            return spot, nearest_exit, path
-    return None, None, None
+                file.write(f"{car_number} unparked from {spot} to exit at {nearest_exit}, Path: {path}, Total Distance: {total_distance} units\n")
+            return spot, nearest_exit, path, total_distance
+    return None, None, None, None
 
 def draw_parking_space(canvas, show_path=False, path=[]):
     canvas.delete("all")
@@ -129,8 +154,8 @@ def draw_parking_space(canvas, show_path=False, path=[]):
             color = "white"
             display_value = ""
 
-            if spot in path:
-                color = "light blue" if show_path else "white"
+            if spot in path and show_path:
+                color = "cyan"  # Path color
             elif value in entry_points:
                 color = "yellow"
                 display_value = value
@@ -138,16 +163,16 @@ def draw_parking_space(canvas, show_path=False, path=[]):
                 color = "red"
                 display_value = occupied_spots[spot][-4:]
             elif value == 'P':
-                color = "green"
+                color = "darkgreen"
                 display_value = "P"
             elif value == 'X':
                 color = "gray"
 
-            x1, y1 = c * 50, r * 50
-            x2, y2 = x1 + 50, y1 + 50
+            x1, y1 = c * 50, r * 50  # Simple square grid
+            x2, y2 = x1 + 50, y1 + 50  # Each cell is 50x50 pixels
             canvas.create_rectangle(x1, y1, x2, y2, fill=color)
             if display_value:
-                canvas.create_text(x1 + 25, y1 + 25, text=display_value)
+                canvas.create_text(x1 + 25, y1 + 25, text=display_value)  # Center text in the rectangle
 
 def toggle_edit_mode():
     global edit_mode
@@ -167,10 +192,12 @@ def cell_click(event):
         return
     
     current_value = parking_layout[r][c]
-    new_value = {' ': 'P', 'P': 'X', 'X': ' '}.get(current_value, ' ')
     
-    if new_value in ['A', 'B', 'C', 'D']:
-        entry_points[new_value] = (r, c)
+    # Prevent changing entry gates
+    if current_value in entry_points:
+        return
+    
+    new_value = {' ': 'P', 'P': 'X', 'X': ' '}.get(current_value, ' ')
     parking_layout[r][c] = new_value
     draw_parking_space(canvas)
 
@@ -183,28 +210,33 @@ def on_park():
     entry_gate = entry_gate_entry.get().strip().upper()
     
     if entry_gate in entry_points:
-        spot, path, error = park_car(car_number, entry_gate)
+        spot, path, total_distance = park_car(car_number, entry_gate)
         if spot:
-            messagebox.showinfo("Parking Success", f"Car {car_number} parked at {spot}.")
+            messagebox.showinfo("Parking Success", f"Car {car_number} parked at {spot}. Distance: {total_distance} units.")
             draw_parking_space(canvas, show_path=True, path=path)
         else:
-            messagebox.showerror("Parking Failed", error)
+            messagebox.showerror("Parking Failed", total_distance)  # total_distance is the error message here
     else:
-        messagebox.showerror("Invalid Entry Gate", "Please enter a valid entry gate (A, B, C, or D).")
+        messagebox.showerror("Invalid Entry Gate", "Please enter a valid entry gate (A, B, C, D, etc.).")
 
 def on_unpark():
     car_number = car_number_entry.get().strip()
     
-    freed_spot, nearest_exit, path = unpark_car(car_number)
+    freed_spot, nearest_exit, path, total_distance = unpark_car(car_number)
     if freed_spot:
         nearest_exit_name = next(key for key, value in entry_points.items() if value == nearest_exit)
-        messagebox.showinfo("Unparking Success", f"Car {car_number} has been unparked from {freed_spot} to exit at {nearest_exit_name}. Path: {path}")
+        messagebox.showinfo("Unparking Success", f"Car {car_number} has been unparked from {freed_spot} to exit at {nearest_exit_name}. Path: {path}. Total Distance: {total_distance} units.")
         draw_parking_space(canvas, show_path=True, path=path)
     else:
         messagebox.showerror("Unparking Failed", "Car not found.")
 
 def toggle_path():
-    draw_parking_space(canvas)
+    global showing_path
+    showing_path = not showing_path
+    if showing_path:
+        draw_parking_space(canvas, show_path=True, path=last_path)
+    else:
+        draw_parking_space(canvas)
 
 # Create the main application window
 root = tk.Tk()
