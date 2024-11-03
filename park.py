@@ -214,11 +214,11 @@ root.title("Smart Parking System")
 control_frame = tk.Frame(root)
 control_frame.pack()
 
-tk.Label(control_frame, text="Car Number:").grid(row=0, column=0)
+tk.Label(control_frame, text="Car Number: ").grid(row=0, column=0)
 car_number_entry = tk.Entry(control_frame)
 car_number_entry.grid(row=0, column=1)
 
-tk.Label(control_frame, text="Entry Gate (A, B, C, or D):").grid(row=1, column=0)
+tk.Label(control_frame, text="Entry Gate: ").grid(row=1, column=0)
 entry_gate_entry = tk.Entry(control_frame)
 entry_gate_entry.grid(row=1, column=1)
 
